@@ -1,0 +1,99 @@
+```{r results='hide', message=FALSE, warning=FALSE}
+library(caret)
+```
+Practical Machine Learning Course Project
+========================================================
+## Executive Summary
+This project explores Human Activity Recognition. Specifically it
+predicts the manner in which an exercise was performed.
+The project data is from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The data is already separated into training and testing sets:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+In order to determine the optimal parameters the training data will be further
+separated into training and validation subsets.
+
+The data has been downloaded into the current directory in order to run the prediction.
+
+## Exploratory Data Analysis
+```{r}
+trainingData <- read.csv('pml-training.csv')
+testingData <- read.csv('pml-testing.csv')
+```
+The training dataset is composed of `r dim(trainingData)[1]` observations of `r dim(trainingData)[2]` variables.
+The testing dataset is composed of `r dim(testingData)[1]` observations of `r dim(testingData)[2]` variables.
+The variables are all interpeted as numeric although several are ordinal.
+The dependent (output) variable in the training data is **classe**, the method of exercise performed.
+In the testing dataset this variable is replaced by **problem_id** used in the project submission.
+
+The first 7 variables are not sensor readings but timing and user information.
+These are not needed for the analysis and are removed.
+All columns consisting of NA data are also removed.
+
+```{r}
+trainingData <- trainingData[8:160]
+testingData <- testingData[8:160]
+testingData <- testingData[,(colSums(is.na(trainingData)) == 0)]
+trainingData <- trainingData[,(colSums(is.na(trainingData)) == 0)]
+```
+The resulting data still has `r dim(trainingData)[2]` variables.
+We will remove near zero variance variables which would not influence the outcome and highly correlated variables which are redundant.
+```{r}
+nsv<- nearZeroVar( trainingData, saveMetrics=TRUE)
+list <- labels(nsv[ nsv$nzv == TRUE,])[1]
+l <- unlist(list)
+trainingData <- trainingData[, -which(names(trainingData) %in% l)]
+testingData <- testingData[, -which(names(testingData) %in% l)]
+```
+The resulting data still has `r dim(trainingData)[2]` variables.
+Now we will remoe highly correlated variables.
+```{r}
+M <- abs( cor( trainingData[,-dim(trainingData)[2]]))
+corrValues <- findCorrelation( M, cutoff = .80, verbose = FALSE)
+trainingData <- trainingData[, -corrValues]
+testingData <- testingData[, -corrValues]
+```
+Now we will split the data into training and validation sets.
+```{r}
+inTrain <- createDataPartition( y = trainingData$classe, p=.5, list=FALSE)
+training <- trainingData[inTrain,]
+cv <- trainingData[-inTrain,]
+```
+Note that this was performed on a Windows machine and uses the doSnow library to
+make use of multiple cores. Update accordingly for different platforms.
+
+```{r  results='hide', message=FALSE, warning=FALSE}
+library("doSNOW")
+```
+```{r cache=TRUE}
+cl<-makeCluster(4)
+registerDoSNOW(cl) # Register the cores.
+model <- train( classe~., data = training, method="rf", prox=TRUE)
+stopCluster(cl)
+
+model
+```
+The model has excellent results, with an in sample error rate of 1.6%.
+We would expect the out of sample error to be somewhat higher and will estimate it using
+the cross validation data.
+
+```{r}
+cvPredict <- predict( model, cv)
+confusionMatrix( cvPredict, cv$classe)
+```
+The out of sample error estimate is .5%, so we do not need to do any more modification of the training model.
+Now we perform prediction on the test data and produce test files for submission.
+
+```{r}
+prediction <- predict( model, testingData)
+write_files <- function(x) {
+        n <- length(x)
+        for (i in 1:n) {
+                filename <- paste0("problem_id", i, ".txt")
+                write.table(x[i], file=filename, quote=FALSE, row.names=FALSE,col.names=FALSE)
+        }
+}
+write_files(prediction)
+```
